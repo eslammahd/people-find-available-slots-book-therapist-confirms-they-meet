@@ -1,142 +1,299 @@
 'use client';
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
-type Slot = {
+interface Slot {
   id: string;
   date: string;
   start_time: string;
   end_time: string;
-  is_booked: boolean;
-};
-
-function formatDate(dateStr: string) {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('en-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  is_available: boolean;
+  day_name?: string;
 }
 
-function formatTime(t: string) {
-  const [h, m] = t.split(':');
-  const hour = parseInt(h);
-  const ampm = hour >= 12 ? 'PM' : 'AM';
-  const dh = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
-  return `${dh}:${m} ${ampm}`;
-}
-
-function groupByDate(slots: Slot[]) {
-  const g: Record<string, Slot[]> = {};
-  for (const s of slots) {
-    if (!g[s.date]) g[s.date] = [];
-    g[s.date].push(s);
-  }
-  return g;
+interface GroupedSlots {
+  [date: string]: Slot[];
 }
 
 export default function HomePage() {
+  const router = useRouter();
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<Slot | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
+  const [step, setStep] = useState<'slots' | 'form' | 'payment' | 'done'>('slots');
+
+  // Form state
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [notes, setNotes] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'vodafone_cash' | 'insta_pay'>('vodafone_cash');
+  const [txRef, setTxRef] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [bookingId, setBookingId] = useState('');
 
   useEffect(() => {
     fetch('/api/slots')
       .then(r => r.json())
-      .then(d => { setSlots(d); setLoading(false); })
+      .then(d => { setSlots(d.slots || []); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
-  const grouped = groupByDate(slots);
-  const dates = Object.keys(grouped).sort();
+  const grouped: GroupedSlots = slots.reduce((acc: GroupedSlots, slot) => {
+    if (!acc[slot.date]) acc[slot.date] = [];
+    acc[slot.date].push(slot);
+    return acc;
+  }, {});
+
+  const formatDate = (dateStr: string) => {
+    const d = new Date(dateStr + 'T00:00:00');
+    return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  };
+
+  const formatTime = (t: string) => {
+    const [h, m] = t.split(':');
+    const hour = parseInt(h);
+    return `${hour > 12 ? hour - 12 : hour}:${m} ${hour >= 12 ? 'PM' : 'AM'}`;
+  };
+
+  const handleBookingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSlot) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      const res = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patientName: name,
+          patientEmail: email,
+          patientPhone: phone,
+          slotId: selectedSlot.id,
+          slotDate: selectedSlot.date,
+          slotTime: `${selectedSlot.start_time} - ${selectedSlot.end_time}`,
+          paymentMethod,
+          transactionRef: txRef,
+          notes
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Booking failed');
+      setBookingId(data.booking.id);
+      setStep('done');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (step === 'done') {
+    return (
+      <div className="max-w-lg mx-auto px-4 py-16 text-center">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-10">
+          <div className="text-6xl mb-4">✅</div>
+          <h1 className="text-2xl font-bold text-slate-800 mb-2">Booking Received!</h1>
+          <p className="text-slate-500 mb-6">Thank you, <strong>{name}</strong>. Dr. Saad will review your booking and confirm your session shortly.</p>
+          <div className="bg-slate-50 rounded-xl p-4 text-left space-y-2 mb-6">
+            <div className="flex justify-between text-sm"><span className="text-slate-500">Date</span><span className="font-medium">{selectedSlot ? formatDate(selectedSlot.date) : ''}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-slate-500">Time</span><span className="font-medium">{selectedSlot ? `${formatTime(selectedSlot.start_time)} – ${formatTime(selectedSlot.end_time)}` : ''}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-slate-500">Payment</span><span className="font-medium">{paymentMethod === 'vodafone_cash' ? '📱 Vodafone Cash' : '💳 Insta Pay'}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-slate-500">Ref #</span><span className="font-medium font-mono">{txRef}</span></div>
+            {bookingId && <div className="flex justify-between text-sm"><span className="text-slate-500">Booking ID</span><span className="font-medium font-mono text-xs">{bookingId.slice(0, 8).toUpperCase()}</span></div>}
+          </div>
+          <p className="text-xs text-slate-400 mb-6">A confirmation email will be sent to <strong>{email}</strong> once Dr. Saad approves.</p>
+          <button onClick={() => { setStep('slots'); setSelectedSlot(null); setName(''); setEmail(''); setPhone(''); setTxRef(''); setNotes(''); setBookingId(''); }} className="w-full bg-brand-600 text-white py-2.5 rounded-xl font-medium hover:bg-brand-700 transition-colors">
+            Book Another Session
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-teal-50 to-white">
-      <header className="bg-white shadow-sm">
-        <div className="max-w-4xl mx-auto px-4 py-5 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-teal-700 flex items-center justify-center text-white font-bold text-lg">DS</div>
-          <div>
-            <h1 className="text-xl font-bold text-teal-800">Dr. Saad — Therapy Sessions</h1>
-            <p className="text-sm text-gray-500">Licensed Therapist · Online &amp; In-Person</p>
-          </div>
-        </div>
-      </header>
+    <div className="max-w-4xl mx-auto px-4 py-10">
+      {/* Hero */}
+      <div className="text-center mb-10">
+        <h1 className="text-3xl font-bold text-slate-800 mb-2">Book a Therapy Session</h1>
+        <p className="text-slate-500">Choose an available slot with Dr. Saad and complete your booking in minutes.</p>
+      </div>
 
-      <main className="max-w-4xl mx-auto px-4 py-10">
-        <div className="text-center mb-10">
-          <h2 className="text-3xl font-bold text-teal-800 mb-3">Book Your Therapy Session</h2>
-          <p className="text-gray-600 text-lg max-w-xl mx-auto">Choose an available time slot, fill in your details, and pay securely using Vodafone Cash or Insta Pay. Dr. Saad will confirm your session shortly.</p>
-        </div>
-
-        <div className="flex flex-wrap justify-center gap-4 mb-12">
-          {[
-            ['1', 'Pick a slot', 'Choose from available times'],
-            ['2', 'Your details', 'Name, email & phone'],
-            ['3', 'Pay online', 'Vodafone Cash or Insta Pay'],
-            ['4', 'Confirmation', 'Dr. Saad confirms your session'],
-          ].map(([n, title, desc]) => (
-            <div key={n} className="flex items-start gap-3 bg-white rounded-xl p-4 shadow-sm w-52">
-              <div className="w-8 h-8 rounded-full bg-teal-700 text-white flex items-center justify-center font-bold text-sm shrink-0">{n}</div>
-              <div>
-                <p className="font-semibold text-gray-800 text-sm">{title}</p>
-                <p className="text-xs text-gray-500">{desc}</p>
+      {/* Steps indicator */}
+      <div className="flex items-center justify-center gap-2 mb-8">
+        {['Choose Slot', 'Your Details', 'Payment'].map((s, i) => {
+          const stepIndex = ['slots', 'form', 'payment'].indexOf(step);
+          const active = i === stepIndex;
+          const done = i < stepIndex;
+          return (
+            <div key={s} className="flex items-center gap-2">
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                done ? 'bg-green-100 text-green-700' : active ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-400'
+              }`}>
+                {done ? '✓' : i + 1}. {s}
               </div>
+              {i < 2 && <span className="text-slate-300">→</span>}
             </div>
-          ))}
-        </div>
+          );
+        })}
+      </div>
 
-        <h3 className="text-xl font-bold text-gray-800 mb-6">Available Slots</h3>
-
-        {loading ? (
-          <div className="text-center py-20">
-            <div className="inline-block w-10 h-10 border-4 border-teal-600 border-t-transparent rounded-full animate-spin" />
-            <p className="mt-4 text-gray-500">Loading available slots...</p>
-          </div>
-        ) : dates.length === 0 ? (
-          <p className="text-center py-20 text-gray-500">No available slots right now. Please check back soon.</p>
-        ) : (
-          <div className="space-y-8">
-            {dates.map(date => (
-              <div key={date}>
-                <h4 className="text-sm font-semibold text-teal-700 uppercase tracking-wide mb-3">{formatDate(date)}</h4>
-                <div className="flex flex-wrap gap-3">
-                  {grouped[date].map(slot => (
-                    <button
-                      key={slot.id}
-                      onClick={() => setSelected(slot)}
-                      className={`px-5 py-3 rounded-lg border-2 font-medium text-sm transition-all ${
-                        selected?.id === slot.id
-                          ? 'bg-teal-700 border-teal-700 text-white shadow-md scale-105'
-                          : 'bg-white border-teal-200 text-teal-800 hover:border-teal-500 hover:shadow'
-                      }`}
-                    >
-                      {formatTime(slot.start_time)} – {formatTime(slot.end_time)}
-                    </button>
-                  ))}
+      {/* Step 1 — Slots */}
+      {step === 'slots' && (
+        <div>
+          {loading ? (
+            <div className="text-center py-20">
+              <div className="inline-block w-8 h-8 border-4 border-brand-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+              <p className="text-slate-500">Loading available slots…</p>
+            </div>
+          ) : Object.keys(grouped).length === 0 ? (
+            <div className="text-center py-20 text-slate-400">No available slots right now. Check back soon.</div>
+          ) : (
+            <div className="space-y-6">
+              {Object.entries(grouped).map(([date, daySlots]) => (
+                <div key={date} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="px-6 py-3 bg-slate-50 border-b border-slate-200">
+                    <h3 className="font-semibold text-slate-700">{formatDate(date)}</h3>
+                  </div>
+                  <div className="p-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {daySlots.map(slot => (
+                      <button
+                        key={slot.id}
+                        onClick={() => { setSelectedSlot(slot); setStep('form'); }}
+                        className="border-2 border-slate-200 rounded-xl py-3 px-4 text-center hover:border-brand-500 hover:bg-brand-50 transition-all group"
+                      >
+                        <div className="font-semibold text-slate-700 group-hover:text-brand-700">{formatTime(slot.start_time)}</div>
+                        <div className="text-xs text-slate-400 mt-0.5">{formatTime(slot.start_time)} – {formatTime(slot.end_time)}</div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {selected && (
-          <div className="mt-10 text-center">
-            <div className="inline-block bg-teal-50 border border-teal-200 rounded-xl px-6 py-4 mb-5">
-              <p className="text-sm text-gray-500">Selected:</p>
-              <p className="font-bold text-teal-800 text-lg">{formatDate(selected.date)}</p>
-              <p className="text-teal-700">{formatTime(selected.start_time)} – {formatTime(selected.end_time)}</p>
+              ))}
             </div>
-            <br />
-            <Link
-              href={`/book?slot=${selected.id}&date=${selected.date}&start=${selected.start_time}&end=${selected.end_time}`}
-              className="inline-block bg-teal-700 hover:bg-teal-800 text-white font-bold px-10 py-4 rounded-xl shadow-lg transition-colors text-lg"
-            >
-              Book This Slot →
-            </Link>
-          </div>
-        )}
-      </main>
+          )}
+        </div>
+      )}
 
-      <footer className="mt-20 py-8 text-center text-sm text-gray-400 border-t">
-        <p>© {new Date().getFullYear()} Dr. Saad Therapy. All rights reserved.</p>
-      </footer>
+      {/* Step 2 — Patient details */}
+      {step === 'form' && selectedSlot && (
+        <div className="max-w-lg mx-auto">
+          <div className="bg-brand-50 border border-brand-200 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <span className="text-2xl">📅</span>
+            <div>
+              <div className="font-semibold text-brand-800">{formatDate(selectedSlot.date)}</div>
+              <div className="text-sm text-brand-600">{formatTime(selectedSlot.start_time)} – {formatTime(selectedSlot.end_time)}</div>
+            </div>
+            <button onClick={() => setStep('slots')} className="ml-auto text-sm text-slate-400 hover:text-slate-600">✕ Change</button>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+            <h2 className="text-lg font-bold text-slate-800 mb-5">Your Details</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Full Name *</label>
+                <input value={name} onChange={e => setName(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none" placeholder="Your full name" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email Address *</label>
+                <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none" placeholder="you@example.com" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Phone Number</label>
+                <input value={phone} onChange={e => setPhone(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none" placeholder="01xxxxxxxxx" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Notes (optional)</label>
+                <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="w-full border border-slate-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none resize-none" placeholder="Anything Dr. Saad should know beforehand…" />
+              </div>
+              <button
+                onClick={() => { if (!name || !email) { setError('Please fill in your name and email'); return; } setError(''); setStep('payment'); }}
+                className="w-full bg-brand-600 text-white py-3 rounded-xl font-semibold hover:bg-brand-700 transition-colors"
+              >
+                Continue to Payment →
+              </button>
+              {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Step 3 — Payment */}
+      {step === 'payment' && selectedSlot && (
+        <div className="max-w-lg mx-auto">
+          <div className="bg-brand-50 border border-brand-200 rounded-xl p-4 mb-6 flex items-center gap-3">
+            <span className="text-2xl">📅</span>
+            <div>
+              <div className="font-semibold text-brand-800">{formatDate(selectedSlot.date)}</div>
+              <div className="text-sm text-brand-600">{formatTime(selectedSlot.start_time)} – {formatTime(selectedSlot.end_time)} · {name}</div>
+            </div>
+          </div>
+
+          <form onSubmit={handleBookingSubmit} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
+            <h2 className="text-lg font-bold text-slate-800">Complete Payment</h2>
+
+            {/* Payment method */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Payment Method *</label>
+              <div className="grid grid-cols-2 gap-3">
+                <button type="button" onClick={() => setPaymentMethod('vodafone_cash')}
+                  className={`border-2 rounded-xl p-4 text-center transition-all ${
+                    paymentMethod === 'vodafone_cash' ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:border-slate-300'
+                  }`}>
+                  <div className="text-2xl mb-1">📱</div>
+                  <div className="font-semibold text-sm text-slate-700">Vodafone Cash</div>
+                </button>
+                <button type="button" onClick={() => setPaymentMethod('insta_pay')}
+                  className={`border-2 rounded-xl p-4 text-center transition-all ${
+                    paymentMethod === 'insta_pay' ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:border-slate-300'
+                  }`}>
+                  <div className="text-2xl mb-1">💳</div>
+                  <div className="font-semibold text-sm text-slate-700">Insta Pay</div>
+                </button>
+              </div>
+            </div>
+
+            {/* Payment instructions */}
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              {paymentMethod === 'vodafone_cash' ? (
+                <>
+                  <p className="font-semibold text-amber-800 mb-1">📱 Vodafone Cash Instructions</p>
+                  <p className="text-sm text-amber-700">Send the session fee to: <strong>010-XXXX-XXXX</strong></p>
+                  <p className="text-sm text-amber-700">Use your name as the reference when sending.</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold text-amber-800 mb-1">💳 Insta Pay Instructions</p>
+                  <p className="text-sm text-amber-700">Transfer to IPA: <strong>drsaad@instapay</strong></p>
+                  <p className="text-sm text-amber-700">Include your name in the transfer note.</p>
+                </>
+              )}
+            </div>
+
+            {/* Transaction ref */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Transaction Reference Number *</label>
+              <input
+                value={txRef}
+                onChange={e => setTxRef(e.target.value)}
+                className="w-full border border-slate-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none font-mono"
+                placeholder="Enter your transaction ID"
+              />
+              <p className="text-xs text-slate-400 mt-1">Found in your payment app after the transfer.</p>
+            </div>
+
+            {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setStep('form')} className="flex-1 border border-slate-300 text-slate-600 py-3 rounded-xl font-medium hover:bg-slate-50 transition-colors">← Back</button>
+              <button type="submit" disabled={submitting || !txRef}
+                className="flex-1 bg-brand-600 text-white py-3 rounded-xl font-semibold hover:bg-brand-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                {submitting ? 'Submitting…' : 'Confirm Booking ✓'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
