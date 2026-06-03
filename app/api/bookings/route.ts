@@ -12,14 +12,14 @@ export async function POST(req: NextRequest) {
   }
 
   const admin = createAdminClient();
+  const isDemo = !slotId || (slotId as string).startsWith('demo-');
 
-  // Try to insert into DB
   const { data, error } = await admin.from('bookings').insert({
     patient_id: patientId || null,
     patient_name: patientName,
     patient_email: patientEmail,
     patient_phone: patientPhone || null,
-    slot_id: slotId && !slotId.startsWith('demo-') ? slotId : null,
+    slot_id: isDemo ? null : slotId,
     slot_date: slotDate,
     slot_time: slotTime,
     payment_method: paymentMethod,
@@ -29,24 +29,24 @@ export async function POST(req: NextRequest) {
   }).select().single();
 
   if (error) {
-    // Return success anyway for demo mode
-    console.error('Booking insert error:', error.message);
-    const demoBooking = {
-      id: `demo-booking-${Date.now()}`,
-      patient_name: patientName,
-      patient_email: patientEmail,
-      slot_date: slotDate,
-      slot_time: slotTime,
-      payment_method: paymentMethod,
-      transaction_ref: transactionRef,
-      status: 'pending',
-      created_at: new Date().toISOString()
-    };
-    return NextResponse.json({ booking: demoBooking, demo: true });
+    // Return a demo booking response so the UI still works
+    return NextResponse.json({
+      booking: {
+        id: `demo-${Date.now()}`,
+        patient_name: patientName,
+        patient_email: patientEmail,
+        slot_date: slotDate,
+        slot_time: slotTime,
+        payment_method: paymentMethod,
+        transaction_ref: transactionRef,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      },
+      demo: true
+    });
   }
 
-  // Mark slot as unavailable
-  if (slotId && !slotId.startsWith('demo-')) {
+  if (!isDemo) {
     await admin.from('slots').update({ is_available: false }).eq('id', slotId);
   }
 
@@ -65,16 +65,10 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient();
   let query = admin.from('bookings').select('*').order('created_at', { ascending: false });
 
-  if (patientId) {
-    query = query.eq('patient_id', patientId);
-  } else if (email) {
-    query = query.eq('patient_email', email);
-  }
+  if (patientId) query = query.eq('patient_id', patientId);
+  else if (email) query = query.eq('patient_email', email);
 
   const { data, error } = await query;
-  if (error) {
-    return NextResponse.json({ bookings: [], error: error.message });
-  }
-
+  if (error) return NextResponse.json({ bookings: [], error: error.message });
   return NextResponse.json({ bookings: data || [] });
 }

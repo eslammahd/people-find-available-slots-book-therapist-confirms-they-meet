@@ -3,7 +3,6 @@ import { createAdminClient } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 
-// Secret endpoint to create admin account — secured by a secret token
 export async function POST(req: NextRequest) {
   const { email, password, fullName, secret } = await req.json();
 
@@ -33,5 +32,5 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ user: data.user });
+  return NextResponse.json({ user: { id: data.user?.id, email: data.user?.email } });
 }

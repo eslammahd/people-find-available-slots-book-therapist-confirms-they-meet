@@ -23,7 +23,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
-  // Manually create profile in case trigger doesn't fire
   if (data.user) {
     await admin.from('profiles').upsert({
       id: data.user.id,
@@ -33,5 +32,5 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ user: data.user });
+  return NextResponse.json({ user: { id: data.user?.id, email: data.user?.email } });
 }

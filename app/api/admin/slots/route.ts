@@ -17,7 +17,11 @@ export async function POST(req: NextRequest) {
   }
 
   const admin = createAdminClient();
-  const { data, error } = await admin.from('slots').insert({ date, start_time, end_time, is_available: true }).select().single();
+  const { data, error } = await admin
+    .from('slots')
+    .insert({ date, start_time, end_time, is_available: true })
+    .select()
+    .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ slot: data });
 }

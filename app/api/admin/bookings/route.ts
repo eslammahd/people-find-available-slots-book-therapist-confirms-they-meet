@@ -3,11 +3,9 @@ import { createAdminClient } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 
-export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get('cookie') || '';
+export async function GET() {
   const admin = createAdminClient();
 
-  // We use service role to fetch all bookings - admin-only via middleware
   const { data, error } = await admin
     .from('bookings')
     .select('*')
