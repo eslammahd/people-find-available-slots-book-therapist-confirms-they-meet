@@ -28,11 +28,15 @@ export default function SignupPage() {
       // Auto sign in
       const supabase = createClient();
       const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-      if (signInError) { setDone(true); return; }
+      if (signInError) {
+        setDone(true);
+        setLoading(false);
+        return;
+      }
       router.push('/');
+      router.refresh();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
-    } finally {
       setLoading(false);
     }
   };
@@ -42,9 +46,9 @@ export default function SignupPage() {
       <div className="max-w-md mx-auto px-4 py-16 text-center">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10">
           <div className="text-5xl mb-4">✉️</div>
-          <h2 className="text-xl font-bold text-slate-800 mb-2">Check your email</h2>
-          <p className="text-slate-500">We sent a confirmation link to <strong>{email}</strong>. Click it to activate your account.</p>
-          <a href="/login" className="mt-6 inline-block text-brand-600 font-medium hover:underline">Go to login →</a>
+          <h2 className="text-xl font-bold text-slate-800 mb-2">Account created!</h2>
+          <p className="text-slate-500">You can now sign in with <strong>{email}</strong>.</p>
+          <a href="/login" className="mt-6 inline-block bg-brand-600 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-brand-700 transition-colors">Go to login →</a>
         </div>
       </div>
     );
