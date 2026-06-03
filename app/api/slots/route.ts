@@ -1,57 +1,61 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 
-export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET() {
-  try {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
+  const admin = createAdminClient();
+  
+  const { data, error } = await admin
+    .from('slots')
+    .select('*')
+    .eq('is_available', true)
+    .gte('date', new Date().toISOString().split('T')[0])
+    .order('date', { ascending: true })
+    .order('start_time', { ascending: true });
 
-    const today = new Date().toISOString().split('T')[0];
-    const { data, error } = await supabase
-      .from('slots')
-      .select('*')
-      .eq('is_booked', false)
-      .gte('date', today)
-      .order('date', { ascending: true })
-      .order('start_time', { ascending: true });
-
-    if (error || !data || data.length === 0) {
-      return NextResponse.json(getDemoSlots());
-    }
-    return NextResponse.json(data);
-  } catch {
-    return NextResponse.json(getDemoSlots());
+  if (error) {
+    // Return demo slots if DB not set up
+    const demoSlots = generateDemoSlots();
+    return NextResponse.json({ slots: demoSlots, demo: true });
   }
+
+  if (!data || data.length === 0) {
+    const demoSlots = generateDemoSlots();
+    return NextResponse.json({ slots: demoSlots, demo: true });
+  }
+
+  return NextResponse.json({ slots: data, demo: false });
 }
 
-function getDemoSlots() {
+function generateDemoSlots() {
   const slots = [];
-  const today = new Date();
-  let count = 0;
-  let dayOffset = 1;
-  const times: [string, string][] = [['10:00', '11:00'], ['12:00', '13:00'], ['15:00', '16:00']];
-
-  while (count < 18 && dayOffset < 30) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + dayOffset);
-    const dow = d.getDay();
-    if (dow !== 5 && dow !== 6) {
-      for (const [start, end] of times) {
-        slots.push({
-          id: `demo-${dayOffset}-${start.replace(':', '')}`,
-          date: d.toISOString().split('T')[0],
-          start_time: start,
-          end_time: end,
-          is_booked: false,
-        });
-        count++;
-      }
+  const times = [
+    { start: '09:00', end: '10:00' },
+    { start: '10:00', end: '11:00' },
+    { start: '11:00', end: '12:00' },
+    { start: '14:00', end: '15:00' },
+    { start: '15:00', end: '16:00' },
+    { start: '16:00', end: '17:00' }
+  ];
+  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  let slotId = 1;
+  for (let d = 1; d <= 7; d++) {
+    const date = new Date();
+    date.setDate(date.getDate() + d);
+    const dayOfWeek = date.getDay();
+    if (dayOfWeek === 5 || dayOfWeek === 6) continue; // skip Fri/Sat
+    const dateStr = date.toISOString().split('T')[0];
+    for (const t of times) {
+      slots.push({
+        id: `demo-${slotId++}`,
+        date: dateStr,
+        start_time: t.start,
+        end_time: t.end,
+        is_available: true,
+        day_name: dayNames[dayOfWeek]
+      });
     }
-    dayOffset++;
   }
   return slots;
 }
